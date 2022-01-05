@@ -1,0 +1,200 @@
+Documentation
+All data was cleaned and processed using R
+# Load packages --------------------
+library(tidyverse)
+library(lubridate)
+library(skimr)
+library(here)
+
+# Read in data ------------
+
+q1_2020 <- read_csv("biketripdata/Divvy_Trips_2020_Q1.csv", 
+                    col_types = cols(started_at = col_datetime(format = "%Y-%m-%d     %H:%M:%S"), 
+                                     ended_at = col_datetime(format = "%Y-%m-%d %H:%M:%S"), 
+                                     start_station_id = col_character()))
+
+
+# Preview and explore the data ---------
+
+head(q1_2020)
+dim(q1_2020)
+str(q1_2020)
+glimpse(q1_2020)
+summary(q1_2020)
+skim(q1_2020)
+
+# Compute new variables ---------------------
+
+# Create column for ride length
+q1_2020 <- q1_2020 %>% 
+  mutate(ride_length = ended_at - started_at)
+
+# Coerce ride length variable to numeric type
+q1_2020$ride_length <- as.double(q1_2020$ride_length)
+
+# Convert ride length to minutes
+q1_2020 <- q1_2020 %>% 
+  mutate(ride_len_min = ride_length/60)
+
+# Compute column for day of the week
+q1_2020 <- q1_2020 %>% 
+  mutate(week_day = wday(started_at, label = T))
+glimpse(q1_2020)
+
+# Confirm new variables created
+glimpse(q1_2020)
+
+# Explore ride lengths
+# There are both negative times and extremely high times 
+summary(q1_2020$ride_len_min)
+
+# Identify outliers -------------
+low_outliers <- subset(q1_2020, ride_length < 60)
+rm(outliers)
+
+#Remove rides under 1min
+q1_2020 <- subset(q1_2020, ride_length > 60)
+
+# Plot ride length
+q1_2020 %>% 
+  ggplot(aes(x = member_casual, y = ride_length))+
+  geom_jitter()
+ggsave("ride_length1.png")
+
+# Identify high outliers
+# Count casual rides with extreme values (probably stolen bikes)
+q1_2020 %>%
+  filter(member_casual == "casual") %>% 
+  filter(ride_length > 100000) %>% 
+  count()
+
+# Count of casual rides over 1 day long (probably stolen bikes)
+q1_2020 %>%
+  filter(member_casual == "casual") %>% 
+  filter(ride_length > 86400) %>% 
+  count()
+
+# Count of member rides over 1 day
+q1_2020 %>%
+  filter(member_casual == "member") %>% 
+  filter(ride_length > 86400) %>% 
+  count()
+
+# Remove outliers from data 
+q1_2020 <- subset(q1_2020, ride_length < 86400)
+q1_2020 <- subset(q1_2020, ride_length > 60)
+
+
+# Check for NAs
+any(is.na(q1_2020$ride_length))
+any(is.na(q1_2020))
+
+# Summarize ----------------------
+
+# Compare members and casual users
+user_summary <- q1_2020 %>% 
+  group_by(member_casual) %>%
+  summarise(number_of_rides = n(), median_duration = median(ride_len_min), 
+            average_duration = mean(ride_len_min)) %>% 
+  arrange(member_casual) 
+
+# Members took 8.7x more trips than casual users in Q1
+374599 / 44302
+
+# Median ride duration of causal users is 2.4x longer than that of members
+21.13333 / 8.65
+
+# A summarise ridership data by type and weekday
+daily_summary <- q1_2020 %>% 
+  group_by(member_casual, week_day) %>% 
+  summarise(number_of_rides = n(), median_duration = median(ride_len_min), 
+            average_duration = mean(ride_len_min)) %>% 
+  arrange(member_casual, week_day)
+
+# Summarise ridership by station
+station_rides <- q1_2020 %>% 
+  group_by(start_station_id, start_station_name, start_lat, start_lng) %>% 
+  summarise(number_of_rides = n(), median_duration = median(ride_len_min), 
+            average_duration = mean(ride_len_min)) %>% 
+  arrange(-number_of_rides)
+
+# Calculate median and mean number of rides per station
+station_avg <- mean(station_rides$number_of_rides)
+sation_med <- median(station_rides$number_of_rides)
+
+# Identify busiest and least busy stations 
+head(station_rides)
+tail(station_rides)
+
+# Identify stations with < 100 rides in 3 months
+low_ridership <- subset(station_rides, number_of_rides < 100) %>% 
+  arrange(start_station_name)
+
+# PLOT --------------------
+
+# Histogram to see distribution of ride times
+q1_2020 %>% 
+  ggplot(aes(x = ride_len_min))+
+  geom_histogram(binwidth = 10)
+
+# Ride time distribution by user type
+q1_2020 %>% 
+  filter(ride_len_min < 125) %>% 
+  ggplot(aes(x = ride_len_min))+
+  geom_histogram(binwidth = 2)+
+  facet_wrap(~member_casual)
+
+
+# Plot ride time for each user type
+q1_2020 %>%
+  ggplot(aes(x = member_casual, y = ride_len_min))+
+  geom_jitter()
+  
+
+# Plot the number of rides by rider type and week day
+q1_2020 %>% 
+  group_by(member_casual, week_day) %>% 
+  summarise(number_of_rides = n(), average_duration = mean(ride_len_min)) %>% 
+  arrange(member_casual, week_day)  %>% 
+  ggplot(aes(x = week_day, y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge")
+
+
+# Plot the median ride time by rider type and week day
+q1_2020 %>% 
+  group_by(member_casual, week_day) %>% 
+  summarise(number_of_rides = n(), med_dur = median(ride_len_min)) %>% 
+  arrange(member_casual, week_day) %>% 
+  ggplot(aes(x = week_day, y = med_dur, fill = member_casual)) +
+  geom_col(position = "dodge")+
+  geom_label()
+
+# Compare number of rides and ride length for all stations
+station_rides %>%
+  filter(median_duration < 60) %>% 
+  ggplot(aes(x = number_of_rides, y = median_duration))+
+  geom_point()+
+  coord_flip()
+
+# Group and remove cols. -------------
+
+q1_2020 <- select(q1_2020, ride_id, member_casual, started_at, ended_at, ride_len_min, week_day, 
+       everything(), -ride_length, -rideable_type)
+  
+
+# Export -----------------------
+
+# Export export daily summary data
+write.csv(daily_summary, file = 'daily_summary.csv')
+
+# Export user summary data
+write.csv(user_summary, file = 'user_summary.csv')
+
+# Export station rides data
+write.csv(station_rides, file = 'station_rides.csv')
+
+# Export low ridership data
+write.csv(low_ridership, file = 'low_ridership.csv')
+
+# Export cleaned q1_2020 data for further analysis 
+write.csv(q1_2020, file = 'C:/Users/redic/Documents/Data Science/Case Studies/q1_2020_clean.csv')
